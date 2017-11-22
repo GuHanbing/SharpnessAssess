@@ -72,8 +72,8 @@ int Ratio=16,Ratio_last=8;
 int skinR=6;
 
 
-vector<string> lists;
-vector<Portrait> roll;
+vector<string> lists,listsM,listsQ;
+vector<Portrait> roll,setM,setQ;
 vector<Mat> picOrdered;
 priority_queue<Portrait> picLists;
 double calcVariance(Mat martrix);
@@ -95,29 +95,53 @@ int main()
     
     
     readLists("../lists.txt",lists,"../Picture/");      //前缀填入: "图片文件夹路径/" 如果图在可执行文件目录下，则不填
+    readLists("../../listsM.txt",listsM,"../../data/mohu/");
+    readLists("../../listsQ.txt",listsQ,"../../data/qingxi/");
 #if debug
     Portrait temp;
-    temp.img=imread(lists[130]);  //93 66 110 35 135 114 30
-    // AssessSharpness(temp.img);
+    temp.img=imread(lists[93]);  //93 66 110 35 135 114 30
+     AssessSharpness(temp.img);
    // temp.code=77;
     Mat srcG;
     cvtColor(temp.img, srcG, CV_BGR2GRAY);
     int result=-1;
     result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
-    if(result!=-1)
-    {
-        portraitSharpness(temp,srcG);
-        imshow("result",temp.resultImg);
-        waitKey(0);
-    }
+//    if(result!=-1)
+//    {
+//        portraitSharpness(temp,srcG);
+//        imshow("result",temp.resultImg);
+//        waitKey(0);
+//    }
     
 #else
     //读取图像并计算清晰度
-
-    for(int i=0;i<160;i++)
+        for(int i=0;i<100;i++)
+        {
+            Portrait temp;
+            temp.img=imread(listsM[i]);  //93 66 110 35 135
+            temp.code=i;
+            Mat srcG;
+            cvtColor(temp.img, srcG, CV_BGR2GRAY);
+            int result=-1;
+            result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
+            if(result!=-1)
+            {
+                portraitSharpness(temp,srcG);
+               // cout<<i<<"sh:"<<temp.sharpness<<endl;
+               // imshow("pic"+format("%d",i),temp.img);
+                setM.push_back(temp);
+            }
+            else
+            {
+                temp.sharpness=0;
+                setM.push_back(temp);
+            }
+    
+        }
+    for(int i=0;i<100;i++)
     {
         Portrait temp;
-        temp.img=imread(lists[i]);  //93 66 110 35 135
+        temp.img=imread(listsQ[i]);  //93 66 110 35 135
         temp.code=i;
         Mat srcG;
         cvtColor(temp.img, srcG, CV_BGR2GRAY);
@@ -126,25 +150,59 @@ int main()
         if(result!=-1)
         {
             portraitSharpness(temp,srcG);
-           // cout<<i<<"sh:"<<temp.sharpness<<endl;
-           // imshow("pic"+format("%d",i),temp.img);
-            picLists.push(temp);
+            // cout<<i<<"sh:"<<temp.sharpness<<endl;
+            // imshow("pic"+format("%d",i),temp.img);
+            setQ.push_back(temp);
         }
-
+        else
+        {
+            temp.sharpness=0;
+            setQ.push_back(temp);
+        }
+        
     }
-    while(!picLists.empty())
+    double accuracy=0;
+    for(int i=0;i<100;i++)
     {
-
-        picOrdered.push_back(picLists.top().resultImg);
-        roll.push_back(picLists.top());
-        picLists.pop();
+        for(int j=0;j<100;j++)
+        {
+            if(setQ[i].sharpness>setM[i].sharpness)
+                accuracy++;
+        }
     }
-
-    //显示
-    Mat show;
-    MergeImage(9,18,1300,700,picOrdered,show,1);
+    accuracy/=10000;
+    cout<<"accuracy"<<accuracy<<endl;
+//    for(int i=0;i<160;i++)
+//    {
+//        Portrait temp;
+//        temp.img=imread(lists[i]);  //93 66 110 35 135
+//        temp.code=i;
+//        Mat srcG;
+//        cvtColor(temp.img, srcG, CV_BGR2GRAY);
+//        int result=-1;
+//        result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
+//        if(result!=-1)
+//        {
+//            portraitSharpness(temp,srcG);
+//           // cout<<i<<"sh:"<<temp.sharpness<<endl;
+//           // imshow("pic"+format("%d",i),temp.img);
+//            picLists.push(temp);
+//        }
+//
+//    }
+//    while(!picLists.empty())
+//    {
+//
+//        picOrdered.push_back(picLists.top().resultImg);
+//        roll.push_back(picLists.top());
+//        picLists.pop();
+//    }
+//
+//    //显示
+//    Mat show;
+//    MergeImage(9,18,1300,700,picOrdered,show,1);
     namedWindow("show", CV_WINDOW_AUTOSIZE);
-    imshow("show",show);
+    //imshow("show",show);
     createTrackbar("ratio:\n", "show", &Ratio, 20, reCal,(void *)(&picOrdered));
     createTrackbar("skinR:\n", "show", &skinR, 20, reCal,(void *)(&picOrdered));
 #endif
@@ -154,28 +212,80 @@ int main()
 
 void reCal(int,void* param)
 {
-    picOrdered.clear();
-    for(int i=0;i<roll.size();i++)
+    for(int i=0;i<100;i++)
     {
-        Portrait temp=roll[i];
+        Portrait &temp=setM[i];
+
         Mat srcG;
         cvtColor(temp.img, srcG, CV_BGR2GRAY);
-        portraitSharpness(temp,srcG);
-        picLists.push(temp);
+
+        if(temp.sharpness!=0)
+        {
+            portraitSharpness(temp,srcG);
+            // cout<<i<<"sh:"<<temp.sharpness<<endl;
+            // imshow("pic"+format("%d",i),temp.img);
+         //   setM.push_back(temp);
+        }
+        else
+        {
+           // temp.sharpness=0;
+           // setM.push_back(temp);
+        }
+        
     }
-    while(!picLists.empty())
+    for(int i=0;i<100;i++)
     {
+        Portrait &temp=setQ[i];
+        Mat srcG;
+        cvtColor(temp.img, srcG, CV_BGR2GRAY);
+
+        if(temp.sharpness!=0)
+        {
+            portraitSharpness(temp,srcG);
+            // cout<<i<<"sh:"<<temp.sharpness<<endl;
+            // imshow("pic"+format("%d",i),temp.img);
+           // setQ.push_back(temp);
+        }
+        else
+        {
+            //temp.sharpness=0;
+            //setQ.push_back(temp);
+        }
         
-        picOrdered.push_back(picLists.top().resultImg);
-        
-        picLists.pop();
     }
-    
-    //显示
-    Mat show;
-    MergeImage(9,18,1300,700,picOrdered,show,1);
-    namedWindow("show", CV_WINDOW_AUTOSIZE);
-    imshow("show",show);
+    double accuracy=0;
+    for(int i=0;i<100;i++)
+    {
+        for(int j=0;j<100;j++)
+        {
+            if(setQ[i].sharpness>setM[i].sharpness)
+                accuracy++;
+        }
+    }
+    accuracy/=10000;
+    cout<<"accuracy"<<accuracy<<endl;
+//    picOrdered.clear();
+//    for(int i=0;i<roll.size();i++)
+//    {
+//        Portrait temp=roll[i];
+//        Mat srcG;
+//        cvtColor(temp.img, srcG, CV_BGR2GRAY);
+//        portraitSharpness(temp,srcG);
+//        picLists.push(temp);
+//    }
+//    while(!picLists.empty())
+//    {
+//
+//        picOrdered.push_back(picLists.top().resultImg);
+//
+//        picLists.pop();
+//    }
+//
+//    //显示
+//    Mat show;
+//    MergeImage(9,18,1300,700,picOrdered,show,1);
+//    namedWindow("show", CV_WINDOW_AUTOSIZE);
+//    imshow("show",show);
 }
 
 void portraitSharpness(Portrait &temp,Mat srcG)
@@ -198,6 +308,7 @@ void portraitSharpness(Portrait &temp,Mat srcG)
         {
            // cout<<i<<endl;
             temp.sharp[i]=calcVariance(srcG(temp.marksRegion[i]));
+          //  temp.sharp[i]=AssessSharpness(srcG(temp.marksRegion[i]),1);
             if(temp.sharp[i]!=0)
                 skin.push(-temp.sharp[i]);
         }
@@ -377,8 +488,8 @@ double AssessSharpness(Mat srcG,double ratio)
     //    // imshow("grad"+format("%d",num),grad);
     //    double min,max;
     //    minMaxLoc(grad, &min, &max);
-    blur(srcG,grad,Size(3,3));
-    Canny(grad,isEdge,25,50,3);
+   // blur(srcG,grad,Size(3,3));
+    Canny(srcG,isEdge,25,50,3);
     
     //   imshow("isEdge"+format("%d",num),isEdge);
     //filiterEdge(isEdge,isEdgeF);    //滤除边缘杂点
@@ -523,7 +634,7 @@ int readLists(const char *fileName,vector<string> & lists,string prefix)
         if(flag==1)     //未遇到空格
         {
             
-            if(c==' '||c=='\n'||c=='\r'||feof(fp))
+            if(c==' '||c=='\n'||c=='\r'||c=='\t'||feof(fp))
             {
                 flag=0;
                 lists.push_back(prefix+name);
@@ -535,7 +646,7 @@ int readLists(const char *fileName,vector<string> & lists,string prefix)
         }
         else
         {
-            if(c!=' '&&c!='\n'&&c!='\r')
+            if(c!=' '&&c!='\n'&&c!='\r'&&c!='\t')
             {
                 flag=1;
                 name=name+c;
