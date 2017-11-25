@@ -8,9 +8,7 @@
 
 #include "face_detection.h"
 #include "face_alignment.h"
-#define debug 0
-#define shownum 1
-#define draw 0
+
 using namespace cv;
 using namespace std;
 //#define MAX(a,b) ( ((a)>(b)) ? (a):(b) )
@@ -20,9 +18,13 @@ int detectFace(Mat imgG,seeta::FaceDetection &detector,Rect &face,seeta::FaceAli
 
 int readLists(const char *  fileName,vector<string> & lists,string prefix="");
 void filiterEdge(Mat  ed,Mat & fi);
-void Calc_PAV_PSG(Mat img,Mat edge,double &PAV,double &PSG);
+
 Rect RectChangeBase(const Rect &big,const Rect &small);
 Rect RectChangeBase(const Mat &pic,const Rect &small);
+int findSeaPoint(Mat isSkin,Point &start);
+void calcRegionVariance(Mat isSkin,Mat variance,Point pos,int &sharpSum,int &validNums);
+void calcRegionVariance2(Mat isSkin,Mat variance,Point pos,int &sharpSum,int &validNums);
+int findSeaPoint(Mat isSkin,Point &start);
 /*
  将多幅图像融合显示
  @para row 子行数
@@ -48,14 +50,19 @@ void MergeImage(int row,
  @para ratio     平坦区和边缘区清晰度权重:0~1
  return: 计算得到的图像清晰度
  */
-double AssessSharpness(Mat srcG,double ratio=0.8);
+
 struct Portrait
 {
     int code;
+    int cube;
     Mat img;
+    Mat imgG;
+    Mat isSkin;
+    Mat variance;
     Mat resultImg;
     Rect faceRegion;
     Point marks[5];
+    Point s[4];
     Rect marksRegion[10];  //Leye,Reye,nose,mouth，forehead，Lforehead,Rforehead,Sforehead
     double sharpness;
     double sharp[10];
@@ -64,6 +71,8 @@ struct Portrait
         return p1.sharpness<p2.sharpness;
     }
     void calcRegion();
+    
+    void calcSharpness();
 };
 void reCal(int,void*);
 
@@ -78,7 +87,17 @@ vector<Mat> picOrdered;
 priority_queue<Portrait> picLists;
 double calcVariance(Mat martrix);
 void portraitSharpness(Portrait &temp,Mat srcG);
+void generate_edge(Mat srcG,Mat &isSkin,Mat &variance,int cube);
 //！每个区域的值后期要加上下限
+
+
+#define debug 0
+#define shownum 1
+#define draw 0
+int cubeSize=5;
+int qr;
+int  cannyThre=40;
+int changeflag=0;
 int main()
 {
     //seetaFace初始化
@@ -99,58 +118,72 @@ int main()
     readLists("../../listsQ.txt",listsQ,"../../data/qingxi/");
 #if debug
     Portrait temp;
-    temp.img=imread(lists[93]);  //93 66 110 35 135 114 30
-     AssessSharpness(temp.img);
-   // temp.code=77;
-    Mat srcG;
-    cvtColor(temp.img, srcG, CV_BGR2GRAY);
-    int result=-1;
-    result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
-//    if(result!=-1)
-//    {
-//        portraitSharpness(temp,srcG);
-//        imshow("result",temp.resultImg);
-//        waitKey(0);
-//    }
+    temp.img=imread(lists[66]);  //93 66 110 35 135 114 30
+    temp.resultImg=temp.img.clone();
+    Mat isSkin,variance;
+    cvtColor(temp.img, temp.imgG, CV_BGR2GRAY);
+    int result=detectFace(temp.imgG,detector,temp.faceRegion,point_detector,temp.marks);
+    if(result!=-1)
+    {
+        temp.cube=cubeSize;
+        temp.calcSharpness();
+    }
+    cout<<temp.sharpness<<endl;
+    //generate_edge(temp.imgG(temp.faceRegion),isSkin,variance,5);
+    //     AssessSharpness(temp.img);
+    //   // temp.code=77;
+    
+    //    int result=-1;
+    //    result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
+    //    if(result!=-1)
+    //    {
+    //        portraitSharpness(temp,srcG);
+    //        imshow("result",temp.resultImg);
+    //        waitKey(0);
+    //    }
     
 #else
     //读取图像并计算清晰度
-        for(int i=0;i<100;i++)
-        {
-            Portrait temp;
-            temp.img=imread(listsM[i]);  //93 66 110 35 135
-            temp.code=i;
-            Mat srcG;
-            cvtColor(temp.img, srcG, CV_BGR2GRAY);
-            int result=-1;
-            result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
-            if(result!=-1)
-            {
-                portraitSharpness(temp,srcG);
-               // cout<<i<<"sh:"<<temp.sharpness<<endl;
-               // imshow("pic"+format("%d",i),temp.img);
-                setM.push_back(temp);
-            }
-            else
-            {
-                temp.sharpness=0;
-                setM.push_back(temp);
-            }
-    
-        }
     for(int i=0;i<100;i++)
     {
         Portrait temp;
-        temp.img=imread(listsQ[i]);  //93 66 110 35 135
         temp.code=i;
-        Mat srcG;
-        cvtColor(temp.img, srcG, CV_BGR2GRAY);
-        int result=-1;
-        result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
+        temp.img=imread(listsM[i]);  //93 66 110 35 135 114 30
+        temp.resultImg=temp.img.clone();
+        Mat isSkin,variance;
+        cvtColor(temp.img, temp.imgG, CV_BGR2GRAY);
+        int result=detectFace(temp.imgG,detector,temp.faceRegion,point_detector,temp.marks);
         if(result!=-1)
         {
-            portraitSharpness(temp,srcG);
+            temp.cube=cubeSize;
+            temp.calcSharpness();
             // cout<<i<<"sh:"<<temp.sharpness<<endl;
+            // imshow("pic"+format("%d",i),temp.img);
+            setM.push_back(temp);
+        }
+        else
+        {
+            temp.sharpness=0;
+            setM.push_back(temp);
+        }
+    }
+    
+    
+    
+    for(int i=0;i<100;i++)
+    {
+        Portrait temp;
+        temp.code=i;
+        temp.img=imread(listsQ[i]);  //93 66 110 35 135 114 30
+        temp.resultImg=temp.img.clone();
+        Mat isSkin,variance;
+        cvtColor(temp.img, temp.imgG, CV_BGR2GRAY);
+        int result=detectFace(temp.imgG,detector,temp.faceRegion,point_detector,temp.marks);
+        if(result!=-1)
+        {
+            temp.cube=cubeSize;
+            temp.calcSharpness();
+             //cout<<i<<"sh:"<<temp.sharpness<<endl;
             // imshow("pic"+format("%d",i),temp.img);
             setQ.push_back(temp);
         }
@@ -166,45 +199,47 @@ int main()
     {
         for(int j=0;j<100;j++)
         {
-            if(setQ[i].sharpness>setM[i].sharpness)
+            if(setQ[i].sharpness>=setM[i].sharpness)
                 accuracy++;
         }
     }
-    accuracy/=10000;
+    accuracy/=100;
     cout<<"accuracy"<<accuracy<<endl;
-//    for(int i=0;i<160;i++)
-//    {
-//        Portrait temp;
-//        temp.img=imread(lists[i]);  //93 66 110 35 135
-//        temp.code=i;
-//        Mat srcG;
-//        cvtColor(temp.img, srcG, CV_BGR2GRAY);
-//        int result=-1;
-//        result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
-//        if(result!=-1)
-//        {
-//            portraitSharpness(temp,srcG);
-//           // cout<<i<<"sh:"<<temp.sharpness<<endl;
-//           // imshow("pic"+format("%d",i),temp.img);
-//            picLists.push(temp);
-//        }
-//
-//    }
-//    while(!picLists.empty())
-//    {
-//
-//        picOrdered.push_back(picLists.top().resultImg);
-//        roll.push_back(picLists.top());
-//        picLists.pop();
-//    }
-//
-//    //显示
-//    Mat show;
-//    MergeImage(9,18,1300,700,picOrdered,show,1);
+    //    for(int i=0;i<160;i++
+    //    {
+    //        Portrait temp;
+    //        temp.img=imread(lists[i]);  //93 66 110 35 135
+    //        temp.code=i;
+    //        Mat srcG;
+    //        cvtColor(temp.img, srcG, CV_BGR2GRAY);
+    //        int result=-1;
+    //        result=detectFace(srcG,detector,temp.faceRegion,point_detector,temp.marks);
+    //        if(result!=-1)
+    //        {
+    //            portraitSharpness(temp,srcG);
+    //           // cout<<i<<"sh:"<<temp.sharpness<<endl;
+    //           // imshow("pic"+format("%d",i),temp.img);
+    //            picLists.push(temp);
+    //        }
+    //
+    //    }
+    //    while(!picLists.empty())
+    //    {
+    //
+    //        picOrdered.push_back(picLists.top().resultImg);
+    //        roll.push_back(picLists.top());
+    //        picLists.pop();
+    //    }
+    //
+    //    //显示
+    //    Mat show;
+    //    MergeImage(9,18,1300,700,picOrdered,show,1);
     namedWindow("show", CV_WINDOW_AUTOSIZE);
     //imshow("show",show);
-    createTrackbar("ratio:\n", "show", &Ratio, 20, reCal,(void *)(&picOrdered));
-    createTrackbar("skinR:\n", "show", &skinR, 20, reCal,(void *)(&picOrdered));
+    createTrackbar("cubeSize:\n", "show", &cubeSize,  10);
+    createTrackbar("cannyThre:\n", "show", &cannyThre, 90);
+    createTrackbar("changeflag:\n", "show", &changeflag, 1, reCal);
+    
 #endif
     waitKey(0);
     return 0;
@@ -215,21 +250,22 @@ void reCal(int,void* param)
     for(int i=0;i<100;i++)
     {
         Portrait &temp=setM[i];
-
+        
         Mat srcG;
         cvtColor(temp.img, srcG, CV_BGR2GRAY);
-
+        
         if(temp.sharpness!=0)
         {
-            portraitSharpness(temp,srcG);
+            temp.cube=cubeSize;
+            temp.calcSharpness();
             // cout<<i<<"sh:"<<temp.sharpness<<endl;
             // imshow("pic"+format("%d",i),temp.img);
-         //   setM.push_back(temp);
+            //   setM.push_back(temp);
         }
         else
         {
-           // temp.sharpness=0;
-           // setM.push_back(temp);
+            // temp.sharpness=0;
+            // setM.push_back(temp);
         }
         
     }
@@ -238,13 +274,14 @@ void reCal(int,void* param)
         Portrait &temp=setQ[i];
         Mat srcG;
         cvtColor(temp.img, srcG, CV_BGR2GRAY);
-
+        
         if(temp.sharpness!=0)
         {
-            portraitSharpness(temp,srcG);
+            temp.cube=cubeSize;
+            temp.calcSharpness();
             // cout<<i<<"sh:"<<temp.sharpness<<endl;
             // imshow("pic"+format("%d",i),temp.img);
-           // setQ.push_back(temp);
+            // setQ.push_back(temp);
         }
         else
         {
@@ -263,169 +300,204 @@ void reCal(int,void* param)
         }
     }
     accuracy/=10000;
-    cout<<"accuracy"<<accuracy<<endl;
-//    picOrdered.clear();
-//    for(int i=0;i<roll.size();i++)
-//    {
-//        Portrait temp=roll[i];
-//        Mat srcG;
-//        cvtColor(temp.img, srcG, CV_BGR2GRAY);
-//        portraitSharpness(temp,srcG);
-//        picLists.push(temp);
-//    }
-//    while(!picLists.empty())
-//    {
-//
-//        picOrdered.push_back(picLists.top().resultImg);
-//
-//        picLists.pop();
-//    }
-//
-//    //显示
-//    Mat show;
-//    MergeImage(9,18,1300,700,picOrdered,show,1);
-//    namedWindow("show", CV_WINDOW_AUTOSIZE);
-//    imshow("show",show);
+    cout<<"cubeSize:"<<cubeSize<<endl;
+    cout<<"cannyThre:"<<cannyThre<<endl;
+    cout<<"accuracy:"<<accuracy<<endl;
 }
 
-void portraitSharpness(Portrait &temp,Mat srcG)
+void Portrait::calcSharpness()
 {
-    temp.calcRegion();
-    temp.resultImg=temp.img.clone();
-    priority_queue<double> skin;
-    for (int i = 0; i<10; i++)
+    double sum=0,v=0;
+    calcRegion();
+    for(int i=0;i<4;i++)
     {
-#if draw
-        if(i>=4)
-        rectangle(temp.resultImg, temp.marksRegion[i], CV_RGB(255, 0, 0));
-#endif
-        if(i==0||i==1||i==3)
+        generate_edge(imgG(marksRegion[i]),isSkin,variance,cube);
+        
+        int r=findSeaPoint(isSkin,s[i]);
+        int sharpSum=0;
+        int validNums=0;
+        if(r==-1)
         {
-            //cout<<i<<endl;
-            temp.sharp[i]=AssessSharpness(srcG(temp.marksRegion[i]),double(Ratio)/20);
+            sharp[i]=0;
+            continue;
         }
-        else if(i>=4)
+        calcRegionVariance(isSkin,variance,s[i],sharpSum,validNums);
+        if(validNums!=0)
         {
-           // cout<<i<<endl;
-            temp.sharp[i]=calcVariance(srcG(temp.marksRegion[i]));
-          //  temp.sharp[i]=AssessSharpness(srcG(temp.marksRegion[i]),1);
-            if(temp.sharp[i]!=0)
-                skin.push(-temp.sharp[i]);
+            sharp[i]=1.0*sharpSum;
+            sum+=sharp[i];
+            v++;
+        }
+        else
+        {
+            sharp[i]=0;
         }
     }
-    //左右眼清晰度
-    if(temp.sharp[0]-temp.sharp[1]>32)
-        temp.sharp[0]=0;
-    else if(temp.sharp[1]-temp.sharp[0]>32)
-        temp.sharp[1]=0;
-    else
+    //if(v!=0)
+    sum/=4;
+    sharpness=sum;
+   // cout<<"sharp:"<<sum<<endl;
+    for(int i=0;i<4;i++)
     {
-        temp.sharp[0]=min(temp.sharp[0],temp.sharp[1]);
-        temp.sharp[1]=temp.sharp[0];
+        rectangle(resultImg, marksRegion[i], CV_RGB(255, 0, 0));
     }
-    double fSh=0;
-    if(skin.size()>=2)
+    imshow("result",resultImg);
+}
+void generate_edge(Mat srcG,Mat &isSkin,Mat &variance,int cube)
+{
+    Mat edge;
+    Mat result,r2;
+    Mat element = getStructuringElement(MORPH_RECT, Size(3, 3));
+    Canny(srcG,edge,cannyThre,cannyThre*2,3);
+    imshow("edge",edge);
+    isSkin=Mat::zeros(edge.rows/cube,edge.cols/cube,CV_8UC1);
+    result=255*Mat::ones(edge.rows/cube,edge.cols/cube,CV_8UC1);
+    variance=Mat::zeros(edge.rows/cube,edge.cols/cube,CV_8UC1);
+    for(int i=0;i<edge.rows-cube;i=i+cube)
     {
-      //skin.pop();
-       fSh=-skin.top();
+        for(int j=0;j<edge.cols-cube;j=j+cube)
+        {
+            
+            Rect c(Point(j,i),Point(j+cube,i+cube));
+            Scalar s=sum(edge(c));
+            if(s[0]==0)
+            {
+                variance.at<uchar>(i/cube,j/cube)=calcVariance(srcG(c));
+                isSkin.at<uchar>(i/cube,j/cube)=255;
+                result.at<uchar>(i/cube,j/cube)=0;
+            }
+            
+        }
     }
-
-    if(fSh>28)
-        fSh=0;
-    fSh=min(85.0,fSh);
-    temp.sharpness=temp.sharp[0]+temp.sharp[1]+temp.sharp[3]+fSh*skinR/2;
-    rectangle(temp.resultImg, temp.faceRegion, CV_RGB(255, 0, 0));
-#if shownum
- putText(temp.resultImg,format("%d",temp.code),Point(50,30),FONT_HERSHEY_SIMPLEX,1,Scalar(255,255,0),4,8);
- putText(temp.resultImg,format("%d",int(temp.sharpness)),Point(20,30),FONT_HERSHEY_SIMPLEX,1,Scalar(255,23,0),4,8);
-#endif
-    //imshow("Result",temp.resultImg);
-    //cout<<temp.sharpness<<endl;
+    //    erode(isSkin, isSkin, element);
+    //    dilate(result,result,element);
+    //    erode(result,result,element);
+    resize(result, result, edge.size());
+    imshow("isSkin",result);
+    r2=variance*50;
+    resize(r2, r2, edge.size());
+    imshow("variance",r2);
 }
 double calcVariance(Mat martrix)
 {
     Mat     mean;
     Mat     stddev;
-    double min,max;
-    minMaxLoc(martrix, &min, &max);
-    if(max-min>0.3*max)
-        return 0;
+    //    double min,max;
+    //    minMaxLoc(martrix, &min, &max);
+    //    if(max-min>0.3*max)
+    //        return 0;
     meanStdDev ( martrix, mean, stddev);
     // uchar       mean_pxl = mean.val[0];
     double       stddev_pxl = stddev.at<double>(0);
     return stddev_pxl*stddev_pxl;
 }
 
+int findSeaPoint(Mat isSkin,Point &start)
+{
+    static int num=0;
+    Mat show=isSkin.clone();
+    vector<vector<Point>> contours;
+    findContours(isSkin, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+    //drawContours(show, contours, -1, Scalar(255));
+    
+    //框出矩形
+    int max=0,maxi;
+    Rect maxR;
+    for (int i = 0; i < contours.size(); i++) {
+        int area=contourArea(contours[i]);
+        //if (area>0.1*isSkin.rows*isSkin.cols) {
+        if(area>max)
+        {
+            //rectangle(show, bndRect, Scalar(255));
+            max=area;
+            maxi=i;
+        }
+        //  }
+    }
+    if(max==0)
+        return -1;
+    else
+    {
+        Moments mu;
+        mu= moments( contours[maxi], false );
+        start=Point2d( mu.m10/mu.m00 , mu.m01/mu.m00 );
+    }
+    circle(show, start, 3, Scalar(140),-1);
+    Size s( isSkin.rows*4,isSkin.cols*4);
+    resize(show, show,s);
+#if debug
+    imshow("isSkin2"+to_string(num), show);
+    num++;
+#endif
+    return 0;
+}
+
+void calcRegionVariance(Mat isSkin,Mat variance,Point pos,int &sharpSum,int &validNums)
+{
+    if(pos.x<0||pos.x>=isSkin.cols||pos.y<0||pos.y>=isSkin.rows)
+        return;
+    if(isSkin.at<uchar>(pos.y,pos.x)==0)
+        return;
+    else
+    {
+        isSkin.at<uchar>(pos.y,pos.x)=0;
+        validNums++;
+        sharpSum+=variance.at<uchar>(pos.y,pos.x);
+        for(int xx=-1;xx<=1;xx++)
+        {
+            for(int yy=-1;yy<=1;yy++)
+            {
+                if(xx==0&&yy==0)
+                    continue;
+                Point next(pos.x+xx,pos.y+yy);
+                calcRegionVariance(isSkin,variance,next,sharpSum,validNums);
+            }
+        }
+    }
+    imshow("af",variance);
+}
+
+void calcRegionVariance2(Mat isSkin,Mat variance,Point pos,int &sharpSum,int &validNums)
+{
+    for(int i=0;i<isSkin.rows;i++)
+    {
+        for(int j=0;j<isSkin.cols;j++)
+        {
+            if(isSkin.at<uchar>(i,j)==255)
+            {
+                sharpSum+=variance.at<uchar>(i,j);
+                validNums++;
+            }
+            
+        }
+    }
+}
 void Portrait::calcRegion()
 {
-    marksRegion[0].x=marks[0].x-0.1*faceRegion.width;
-    marksRegion[0].y=marks[0].y-0.05*faceRegion.height;
-    marksRegion[0].width=0.2*faceRegion.width;
-    marksRegion[0].height=0.15*faceRegion.height;
-    marksRegion[0]=RectChangeBase(img,marksRegion[0]);
-    marksRegion[1].x=marks[1].x-0.1*faceRegion.width;
-    marksRegion[1].y=marks[1].y-0.05*faceRegion.height;
-    marksRegion[1].width=0.2*faceRegion.width;
-    marksRegion[1].height=0.15*faceRegion.height;
-    marksRegion[1]=RectChangeBase(img,marksRegion[1]);
+    marksRegion[0].x=faceRegion.x;
+    marksRegion[0].y=faceRegion.y;
+    marksRegion[0].width=marks[2].x-faceRegion.x;
+    marksRegion[0].height=marks[0].y-faceRegion.y;
+    marksRegion[0]=RectChangeBase(img, marksRegion[0]);
     
-    marksRegion[2].x=marks[2].x-0.1*faceRegion.width;
-    marksRegion[2].y=marks[2].y-0.2*faceRegion.height;
-    marksRegion[2].width=0.2*faceRegion.width;
-    marksRegion[2].height=0.30*faceRegion.height;
-    marksRegion[2]=RectChangeBase(img,marksRegion[2]);
+    marksRegion[1].x=marks[2].x+1;
+    marksRegion[1].y=faceRegion.y;
+    marksRegion[1].width=faceRegion.x+faceRegion.width-marks[2].x-1;
+    marksRegion[1].height=marks[0].y-faceRegion.y;
+    marksRegion[1]=RectChangeBase(img, marksRegion[1]);
     
-    //mouth
-    int mWidth=marks[4].x-marks[3].x;
-    marksRegion[3].x=marks[3].x-0.2*mWidth;
-    marksRegion[3].y=marks[3].y-0.1*faceRegion.height;
-    marksRegion[3].width=1.4*mWidth;
-    marksRegion[3].height=0.25*faceRegion.height;
-    marksRegion[3]=RectChangeBase(img,marksRegion[3]);
+    marksRegion[2].x=faceRegion.x;
+    marksRegion[2].y=marks[0].y;
+    marksRegion[2].width=marks[2].x-faceRegion.x;
+    marksRegion[2].height=faceRegion.y+faceRegion.height-marks[0].y;
+    marksRegion[2]=RectChangeBase(img, marksRegion[2]);
     
-    //forehead
-    int eyeY=min(marksRegion[0].y,marksRegion[1].y);
-    int upY=faceRegion.y;
-    int eyeDis=marksRegion[1].x-marksRegion[0].x;
-    marksRegion[4].height=(eyeY-upY)*0.5;
-    marksRegion[4].width=eyeDis*0.50;
-    marksRegion[4].x=(marksRegion[1].x+marksRegion[0].x+marksRegion[1].width)/2-0.5*marksRegion[4].width;
-    marksRegion[4].y=upY+0.2*(eyeY-upY);
-    marksRegion[4]=RectChangeBase(img,marksRegion[4]);
+    marksRegion[3].x=marks[2].x+1;
+    marksRegion[3].y=marks[0].y;
+    marksRegion[3].width=faceRegion.x+faceRegion.width-marks[2].x-1;
+    marksRegion[3].height=faceRegion.y+faceRegion.height-marks[0].y;
+    marksRegion[3]=RectChangeBase(img, marksRegion[3]);
     
-    int cube=0.5*mWidth;
-    marksRegion[5].width=cube;
-    marksRegion[5].height=cube;
-    marksRegion[5].x=marks[0].x;
-    marksRegion[5].y=marksRegion[4].y-marksRegion[5].height*0.3;
-    marksRegion[5]=RectChangeBase(img,marksRegion[5]);
-    
-    marksRegion[6].width=cube;
-    marksRegion[6].height=cube;
-    marksRegion[6].x=marks[1].x-cube;
-    marksRegion[6].y=marksRegion[4].y-marksRegion[6].height*0.3;
-    marksRegion[6]=RectChangeBase(img,marksRegion[6]);
-    
-
-    
-    marksRegion[7].width=cube;
-    marksRegion[7].height=cube;
-    marksRegion[7].x=(marks[0].x+marks[1].x)/2-cube/2;
-    marksRegion[7].y=marksRegion[4].y+marksRegion[7].height*0.2;
-    marksRegion[7]=RectChangeBase(img,marksRegion[7]);
-    
-
-    marksRegion[8].width=cube;
-    marksRegion[8].height=marksRegion[8].width;
-    marksRegion[8].x=marks[3].x-marksRegion[8].width;
-    marksRegion[8].y=marks[3].y-1.2*marksRegion[8].height;
-    marksRegion[8]=RectChangeBase(img,marksRegion[8]);
-    
-    marksRegion[9].width=cube;
-    marksRegion[9].height=marksRegion[9].width;
-    marksRegion[9].x=marks[4].x+marksRegion[9].height*0.2;
-    marksRegion[9].y=marks[3].y-1.2*marksRegion[9].height;
-    marksRegion[9]=RectChangeBase(img,marksRegion[9]);
 }
 
 Rect RectChangeBase(const Rect &big,const Rect &small)
@@ -466,42 +538,9 @@ Rect RectChangeBase(const Mat &pic,const Rect &small)
     return newR;
 }
 
-double AssessSharpness(Mat srcG,double ratio)
-{
-//    Mat     mean;
-//    Mat     stddev;
-//    double min,max;
-//    minMaxLoc(srcG, &min, &max);
-//    meanStdDev ( srcG, mean, stddev);
-//    double       mean_pxl = sqrt(mean.at<double>(0));
-//    if(mean_pxl<10)
-//        return 0;
-    static int num=0;
-    imshow("src"+format("%d",num),srcG);
-    Mat kern = (Mat_<double>(3,3) <<
-                1, 1,  1,                          // 生成一个掩模核
-                1,-8,  1,
-                1, 1,  1);
-    Mat grad,isEdge,isEdgeF;      //梯度图像,边缘图像
-    
-    //    filter2D(srcG, grad, srcG.depth(), kern );  //生成梯度图像
-    //    // imshow("grad"+format("%d",num),grad);
-    //    double min,max;
-    //    minMaxLoc(grad, &min, &max);
-   // blur(srcG,grad,Size(3,3));
-    Canny(srcG,isEdge,25,50,3);
-    
-    //   imshow("isEdge"+format("%d",num),isEdge);
-    //filiterEdge(isEdge,isEdgeF);    //滤除边缘杂点
-    imshow("isEdge"+format("%d",num),isEdge);
-    //num++;
-    double PAV,PSG;
-    Calc_PAV_PSG(srcG,isEdge,PAV,PSG);
-    //cout<<PAV<<" "<<PSG<<endl;
-    
 
-    return ratio*PAV+(1-ratio)*PSG;
-}
+
+
 
 void filiterEdge(Mat ed,Mat & fi)
 {
@@ -524,38 +563,7 @@ void filiterEdge(Mat ed,Mat & fi)
     }
 }
 
-void Calc_PAV_PSG(Mat img,Mat edge,double &PAV,double &PSG)
-{
-    PAV=0;
-    PSG=0;
-    Mat imgT;
-    normalize(img, imgT, 0, 100, NORM_MINMAX, -1, Mat());
-    
-    for (int i = 1; i < img.rows-1; i++)
-    {
-        
-        for (int j = 1; j < img.cols * 1-1; j++)
-        {
-            uchar * dataP = imgT.ptr<uchar>(i-1);
-            uchar * data = imgT.ptr<uchar>(i);
-            uchar * dataA = imgT.ptr<uchar>(i+1);
-            uchar * isEdge= edge.ptr<uchar>(i);
-            
-            uchar c=data[j];
-            
-            if(isEdge[j]==0)   //平坦区
-            {
-                PAV+=(fabs(dataP[j-1]-c)+fabs(dataP[j+1]-c)+fabs(dataA[j-1]-c)+fabs(dataA[j+1]-c))/sqrt(2); //45°方向
-                PAV+=fabs(dataP[j]-c)+fabs(data[j-1]-c)+fabs(data[j+1]-c)+fabs(dataA[j]-c);                //90°方向
-            }
-            else              //边缘区
-                PSG+=((data[j+1]-c)*(data[j+1]-c)+(dataA[j]-c)*(dataA[j]-c));
-            
-        }
-    }
-    PAV/=(img.rows*img.cols);
-    PSG/=(img.rows*img.cols);
-}
+
 
 
 
